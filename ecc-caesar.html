@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Toy ECC, Caesar Cipher and Attacks</title>
+<style>
+  body { font-family: Georgia, 'Times New Roman', serif; max-width: 800px; margin: 40px auto; padding: 0 16px 60px; line-height: 1.6; color: #222; background: #fff; }
+  h1 { font-size: 1.7em; margin-bottom: 0.2em; }
+  h2 { margin-top: 2em; border-bottom: 1px solid #ddd; padding-bottom: 0.2em; font-size: 1.3em; }
+  h3 { margin-top: 1.4em; font-size: 1.05em; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.93em; }
+  th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: #f3f3f3; }
+  pre { background: #f6f6f6; border: 1px solid #ddd; padding: 12px; overflow-x: auto; font-size: 0.82em; line-height: 1.45; }
+  code { font-family: Consolas, Menlo, monospace; }
+  .meta { color: #666; font-size: 0.85em; }
+  .ok { color: #1a7f37; font-weight: bold; }
+  .bad { color: #b42318; }
+  .wrap { overflow-x: auto; }
+</style>
+</head>
+<body>
+
+<h1>Toy ECC, the Caesar Cipher and Two Attacks</h1>
+<p class="meta">Based on the toy curve from Part 1</p>
+
+<p>This report uses the toy elliptic curve from Part 1 to encrypt and decrypt a message, repeats the exercise with the Caesar cipher, and compares the two schemes. It then describes a statistical attack on the Caesar cipher and an attack on the toy ECC scheme that exploits its small private key. All results were obtained with a Python script written for this purpose.</p>
+
+<h2>1. The toy curve</h2>
+<p>The curve is y&sup2; = x&sup3; + 7 over the prime 17, with generator G = (1, 5). Repeated addition of G gives the following points:</p>
+<div class="wrap"><table>
+<tr><th>k</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>9</th></tr>
+<tr><th>kG</th><td>(1, 5)</td><td>(2, 10)</td><td>(5, 9)</td><td>(12, 1)</td><td>(12, 16)</td><td>(5, 8)</td><td>(2, 7)</td><td>(1, 12)</td><td>&infin;</td></tr>
+</table></div>
+<p>Since 9G is the point at infinity, G has order 9 and the private key d is a number from 1 to 8. The public key is Q = dG. The real secp256k1 curve has about 2<sup>256</sup> possible keys. Because 9 is not prime, multiples of 3 are avoided as keys: they would place the shared point in a subgroup of only three points.</p>
+
+<h2>2. Encryption with the toy ECC scheme</h2>
+<p>A text message cannot easily be mapped to a point on such a curve, so the curve is used to agree on a shared point, which is then hashed to produce a key stream that is XORed with the message (the idea behind ECIES).</p>
+<p><strong>Encryption</strong> (the sender knows Q):</p>
+<ol>
+  <li>Choose a one-time random number r.</li>
+  <li>Compute R = rG, which is sent with the ciphertext.</li>
+  <li>Compute the shared point S = rQ.</li>
+  <li>Hash S with SHA-256 to obtain a key stream of the message length.</li>
+  <li>Ciphertext = message XOR key stream.</li>
+</ol>
+<p><strong>Decryption</strong> (the receiver knows d): compute S = dR, derive the same key stream and XOR it with the ciphertext. Both sides obtain the same S because dR = d(rG) = r(dG) = rQ.</p>
+<p><strong>Role of the keys.</strong> The private key d is secret and is needed to decrypt. The public key Q is published and allows anyone to encrypt for the receiver. The value r is used once per message, so that each message has a different key stream, and R transmits the information the receiver needs to recompute S.</p>
+<pre>message       : Attack at dawn
+private key d : 5
+public key Q  : 5G = (12, 16)
+one-time r    : 7
+R = rG        : (2, 7)
+S = rQ        : 35G = 8G = (1, 12)
+ciphertext    : 0e37da27e90ab9858c7b072312aa  (hex)
+decrypted     : Attack at dawn</pre>
+
+<h2>3. The Caesar cipher</h2>
+<p>With letters numbered A = 0 to Z = 25, encryption is (x + k) mod 26 and decryption is (y &minus; k) mod 26. With k = 3:</p>
+<pre>message    : Attack at dawn
+ciphertext : Dwwdfn dw gdzq
+decrypted  : Attack at dawn</pre>
+
+<h2>4. Comparison of the two schemes</h2>
+<table>
+  <tr><th></th><th>Caesar</th><th>Toy ECC</th></tr>
+  <tr><td>Keys</td><td>One secret key k</td><td>Private key d, public key Q, one-time key r</td></tr>
+  <tr><td>Encryption</td><td>Shift each letter by k</td><td>Compute S = rQ, hash it, XOR with the message</td></tr>
+  <tr><td>Decryption</td><td>Shift each letter by &minus;k</td><td>Compute S = dR, hash it, XOR with the ciphertext</td></tr>
+  <tr><td>Key space</td><td>25 useful keys</td><td>8 private keys (6 if multiples of 3 are excluded); about 2<sup>256</sup> for the real curve</td></tr>
+</table>
+<p><strong>Similarities.</strong> Both schemes treat each symbol separately, so changing one plaintext letter changes only one ciphertext symbol. Both are reversible with the key, and in these toy versions both have a key space small enough to be searched exhaustively. <strong>Differences.</strong> Caesar is symmetric, while the ECC scheme is public-key. Caesar applies the same shift to every letter, whereas the ECC scheme uses a different key stream byte at every position.</p>
+<p>To compare the statistical properties, 20,000 bytes of English text were encrypted with both schemes (the index of coincidence is the probability that two random bytes are equal; it is about 0.004 for random data).</p>
+<table>
+  <tr><th></th><th>Plaintext</th><th>Caesar</th><th>Toy ECC</th></tr>
+  <tr><td>Entropy (bits per byte, maximum 8)</td><td>4.48</td><td>4.48</td><td>7.99</td></tr>
+  <tr><td>Index of coincidence</td><td>0.0695</td><td>0.0695</td><td>0.0040</td></tr>
+</table>
+<p>The Caesar ciphertext has exactly the same statistics as the plaintext, since the letter frequencies are only moved to other letters. This is what the statistical attack exploits. The ECC ciphertext looks random, but this is due to the SHA-256 key stream and not to the curve itself: the points kG only take 4 different x values (1, 2, 5 and 12).</p>
+
+<h2>5. Statistical attack on the Caesar cipher</h2>
+<p>With only 25 keys, an exhaustive search is always possible. The task is to decide automatically which candidate is the correct text, using statistics of English computed from a corpus of 1,885,407 letters from three public-domain books (<i>Emma</i>, <i>Moby Dick</i>, <i>The Man Who Was Thursday</i>). The most frequent letters in the corpus are E, T, A, O, N, I. Three methods were compared:</p>
+<ol>
+  <li><strong>Most common letter.</strong> The most frequent ciphertext letter is assumed to be E.</li>
+  <li><strong>Chi-square.</strong> The shift whose letter counts are closest to the English frequencies is chosen.</li>
+  <li><strong>Bigram score.</strong> The shift whose pairs of adjacent letters are most typical of English is chosen.</li>
+</ol>
+<p>The methods were tested on three other books (<i>Alice in Wonderland</i>, <i>Hamlet</i>, <i>Persuasion</i>), using 900 random text pieces of each length, each encrypted with a random key. The table shows the percentage of keys recovered.</p>
+<div class="wrap"><table>
+<tr><th>Method \ letters</th><th>5</th><th>10</th><th>20</th><th>50</th><th>100</th><th>200</th></tr>
+<tr><td>Most common letter = E</td><td>15.7</td><td>26.2</td><td>33.2</td><td>53.6</td><td>65.8</td><td>79.6</td></tr><tr><td>Chi-square</td><td>48.9</td><td>77.3</td><td>93.6</td><td>99.9</td><td>100.0</td><td>100.0</td></tr><tr><td>Bigram score</td><td>73.7</td><td>96.7</td><td>99.7</td><td>100.0</td><td>100.0</td><td>100.0</td></tr></table></div>
+<p>The most-common-letter method is the weakest, reaching only 79.6% with 200 letters, because E is not always the most frequent letter in a short text. Chi-square reaches 99.9% at 50 letters. The bigram score needs the least text (96.7% at 10 letters), because it uses the order of the letters and not only their frequencies.</p>
+<p><strong>Limitations.</strong> The attack is unreliable on very short texts: with 5 letters even the bigram score finds the key only about 74% of the time. It also fails when the text is unusual: the sentence "Jazz quiz fuzz box zip" was decrypted incorrectly by all three methods. In addition, the language must be known and the text must use a single Caesar key. In a further test, the English model still decrypted an Italian sentence correctly with chi-square and bigrams, but this is a single example.</p>
+
+<h2>6. Attack on the toy ECC scheme</h2>
+<p>An attacker knows Q, R and the ciphertext. Since d can only be 1 to 8, the attacker computes G, 2G, 3G, &hellip; until the result equals Q. This happened at d = 5 after 5 attempts. Then S = dR gives the key stream and the message <code>Attack at dawn</code> is recovered. Q is not even necessary: S must be one of the 8 points of the curve, and trying all of them produces exactly one readable message.</p>
+<p><strong>Comparison with the Caesar attack.</strong> The Caesar attack uses the statistics of the message, so it can fail and works better on longer texts. The ECC attack uses only the public key and the small key space. It is exact, because dG either equals Q or not, and it works for any message of any length.</p>
+<p><strong>Why it does not work on a real key.</strong> A real private key is a number of about 2<sup>256</sup> possibilities, so exhaustive search is impossible. The faster baby-step giant-step method still needs about 2<sup>128</sup> = 3.4 &times; 10<sup>38</sup> steps: at 10<sup>12</sup> steps per second this takes about 1.1 &times; 10<sup>19</sup> years and needs a similar amount of memory. There is also no statistical shortcut, because the ciphertext looks random. The only real difference between the toy scheme and a secure one is the size of the key.</p>
+<p><strong>Other weaknesses.</strong></p>
+<ul>
+  <li>From the small key space: the one-time key r is also between 1 and 8, so it can be found from R in the same way.</li>
+  <li>From the design: the ciphertext is not authenticated. Knowing that the message contains "dawn", the ciphertext was modified so that the receiver decrypted <code>Attack at dusk</code> without any warning. This would also work with a full-size key and could be prevented with a message authentication code.</li>
+  <li>From the design: if the same r were used for two messages, both would use the same key stream, and the XOR of the two ciphertexts would equal the XOR of the two messages.</li>
+</ul>
+
+</body>
+</html>
